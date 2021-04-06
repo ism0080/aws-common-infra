@@ -19,7 +19,7 @@ Resources:
         Rules:
           - Id: ApplicationArtifacts
             ExpirationInDays: 30
-            Status: Enabled
+            Status: Disabled
 Outputs:
     ArtifactsBucket:
         Description: Bucket to store applications for lambda
