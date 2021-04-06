@@ -1,0 +1,29 @@
+
+name: Common Infra Cloudformation Stack
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: 'AWS Region'
+        required: true
+        default: 'ap-southeast-2'
+
+jobs:
+  upload:
+    name: Deploy stack to AWS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.CF_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.CF_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.inputs.region }}
+      - name: Create Common Infra
+        uses: aws-actions/aws-cloudformation-github-deploy@v1.0.3
+        with:
+          name: common-infra
+          template: ./deployment/templates/_master.template
+          no-fail-on-empty-changeset: '1'
