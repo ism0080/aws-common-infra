@@ -25,5 +25,5 @@ jobs:
         uses: aws-actions/aws-cloudformation-github-deploy@v1.0.3
         with:
           name: common-infra
-          template: ./deployment/templates/_master.template
+          template: ./deployment/infra/templates/_master.template
           no-fail-on-empty-changeset: '1'
