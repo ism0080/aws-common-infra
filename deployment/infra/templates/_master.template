@@ -15,6 +15,10 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ApplicationArtifacts
+            ExpirationInDays: 30
 Outputs:
     ArtifactsBucket:
         Description: Bucket to store applications for lambda
