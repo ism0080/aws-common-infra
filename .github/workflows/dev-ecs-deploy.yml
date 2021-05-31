@@ -31,7 +31,7 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: cf_template
-          path: ./_master.template.packaged.json
+          path: ./dev-ecs/infra/_master.template.packaged.json
 
   upload:
     name: Deploy stack to AWS
