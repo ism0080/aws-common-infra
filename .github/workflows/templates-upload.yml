@@ -4,7 +4,7 @@ name: Common Cloudformation Templates S3 Upload
 on:
   workflow_run:
     workflows:
-      - infra-deploy
+      - Common Infra Cloudformation Stack
     types:
       - completed
 

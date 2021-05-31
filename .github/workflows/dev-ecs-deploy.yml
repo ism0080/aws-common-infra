@@ -4,7 +4,7 @@ name: Dev ECS Infrastructure Stack
 on:
   workflow_run:
     workflows:
-      - infra-deploy
+      - Common Infra Cloudformation Stack
     types:
       - completed
 
