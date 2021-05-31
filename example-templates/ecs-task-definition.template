@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  InfraStack:
+    Type: String
+    Description: The name of the networking stack that these resources are put into.
+  AppName:
+    Type: String
+    Description: A human-readable name for the service.
+  HealthCheckPath:
+    Type: String
+    Default: /health
+    Description: Path to perform the healthcheck on each instance.
+  HealthCheckIntervalSeconds:
+    Type: Number
+    Default: 150
+    Description: Number of seconds to wait between each health check.
+  HealthCheckTimeoutSeconds:
+    Type: Number
+  HealthyThresholdCount:
+    Type: Number
+  UnhealthyThresholdCount:
+    Type: Number
+  MaximumPercent:
+    Type: Number
+    Default: 200
+  MinimumHealthyPercent:
+    Type: Number
+    Default: 50
+  AppPort:
+    Type: Number
+    Description: The port number the application inside the docker container is binding to.
+  ContainerCpu:
+    Type: Number
+    Default: 256
+    Description: How much CPU to give the container. 1024 is 1 CPU.
+  ContainerMemory:
+    Type: Number
+    Default: 512
+    Description: How much memory in megabytes to give the container.
+  DesiredCount:
+    Type: Number
+    Default: 1
+    Description: How many copies of the service task to run.
+  DNSHostedZoneId:
+    Description: Hosted Zone ID for the AppDomainName URL
+    Type: String
+  AppDomainName:
+    Description: URL for the service
+    Type: String
+  AppBuildNumber:
+    Type: String
+  AppVersion:
+    Type: String
+    Default: '1.0'
+  EcsTaskDefinition:
+    Type: String
+  TemplatesBucketName:
+    Type: String
+  TemplatesPathPrefix:
+    Type: String
+
+Resources:
+  CloudWatchLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref AWS::StackName
+      RetentionInDays: 90
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AppName
+      Cpu: !Ref ContainerCpu
+      Memory: !Ref ContainerMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      ContainerDefinitions:
+        - Name: !Ref AppName
+          Cpu: !Ref ContainerCpu
+          Memory: !Ref ContainerMemory
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}:${AppBuildNumber}
+          PortMappings:
+            - ContainerPort: !Ref AppPort
+          LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-group: !Ref CloudWatchLogsGroup
+                awslogs-region: !Ref AWS::Region
+                awslogs-stream-prefix: !Ref AWS::StackName
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub ecs-task-${AWS::StackName}
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParametersByPath
+                Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  EcsServiceStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplatesBucketName}.s3.amazonaws.com/${TemplatesPathPrefix}templates_common/ecs-service.template
+      Parameters:
+        AppDomainName: !Ref AppDomainName
+        AppName: !Ref AppName
+        AppBuildNumber: !Ref AppBuildNumber
+        AppVersion: !Ref AppVersion
+        AppPort: !Ref AppPort
+        HealthCheckPath: !Ref HealthCheckPath
+        HealthCheckIntervalSeconds: !Ref HealthCheckIntervalSeconds
+        HealthCheckTimeoutSeconds: !Ref HealthCheckTimeoutSeconds
+        HealthyThresholdCount: !Ref HealthyThresholdCount
+        UnhealthyThresholdCount: !Ref UnhealthyThresholdCount
+        EcsTaskDefinition: !Ref EcsTaskDefinition
+        MaximumPercent: !Ref MaximumPercent
+        MinimumHealthyPercent: !Ref MinimumHealthyPercent
+        DesiredCount: !Ref DesiredCount
+        DNSHostedZoneId: !Ref DNSHostedZoneId
+        InfraStack: !Ref InfraStack
+      TimeoutInMinutes: 20
+
+Outputs:
+  EndpointUrl:
+    Value: !Sub "https://${AppDomainName}/"

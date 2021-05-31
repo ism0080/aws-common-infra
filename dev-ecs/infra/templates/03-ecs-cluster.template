@@ -1,0 +1,174 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  ClusterName:
+    Type: String
+  VPC:
+    Type: String
+  AlbSecurityGroup:
+    Type: String
+
+Resources: 
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+  
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to ECS containers
+      VpcId: !Ref VPC
+  
+  ECSSecurityGroupIngressFromPublicALB:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: "-1"
+      Description: "Ingress from the public ALB"
+      GroupId: !Ref ECSSecurityGroup
+      SourceSecurityGroupId: !Ref AlbSecurityGroup
+  
+  ECSSecurityGroupIngressFromSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: "-1"
+      Description: "Ingress from other containers in the same security group"
+      GroupId: !Ref ECSSecurityGroup
+      SourceSecurityGroupId: !Ref ECSSecurityGroup
+  # Listener Rule
+  ListenerRuleManagerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: alb-listener-rule-manager
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:*
+                  - logs:*
+                  - ecr:*
+                Resource: '*'
+
+  ListenerRuleManager:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Manages application load balancer listener rules
+      Role: !GetAtt ListenerRuleManagerRole.Arn
+      Handler: index.lambda_handler
+      MemorySize: 512
+      Runtime: python2.7
+      Timeout: 30
+      Environment:
+        Variables:
+          log_level: info
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import random
+          import logging
+          from urllib2 import build_opener, HTTPHandler, Request
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          elbv2 = boto3.client('elbv2')
+          elb_priority_range = 1000, 49000   # Max is 50,000 but leave some room for CF update actions
+
+          def lambda_handler(event, context):
+            logger.info('Request Event: %s', event)
+            logger.info('Request Context: %s', context)
+
+            try:
+              properties = event['ResourceProperties']
+              listenerArn = properties['ListenerArn']
+              appName = properties['AppName']
+              appBuildNumber = properties['AppBuildNumber']
+              priority = find_random_free_priority(listenerArn)
+              physicalResourceId = appName + appBuildNumber + priority
+
+              send_response(event, context, 'SUCCESS', physicalResourceId, {
+                'Priority': priority,
+                'PathPattern': '/*'    # Only required for LEGACY app-deploy templates
+              })
+            except Exception as e:
+              logger.error("GOT EXCEPTION: %s" % repr(e))
+              status = 'SUCCESS' if event['RequestType'] == 'Delete' else 'FAILED'
+              send_response(event, context, status, event.get('PhysicalResourceId', None) or 'Nothing', {})
+
+          def get_all_priorities(listener_arn):
+            rules = elbv2.describe_rules(ListenerArn = listener_arn)['Rules']
+            priorities = (int(r['Priority']) for r in rules if r['Priority'].isdigit())
+            return priorities
+
+          def find_random_free_priority(listenerArn):
+            all_priorities = set(range(*elb_priority_range))
+            used_priorities = set(get_all_priorities(listenerArn))
+            #print 'USED:', used_priorities
+            free_priorities = all_priorities - used_priorities
+            #print 'FREE:', free_priorities
+            logger.info('Priority Range: %s -> %s', *elb_priority_range)
+            logger.info('Total Used Priorities: %s', len(used_priorities))
+            logger.info('Total Free Priorities: %s', len(free_priorities))
+
+            try:
+              random_free_priority = random.choice(list(free_priorities))
+            except Exception as e:
+              logger.error(str(e))
+              raise Exception('No available priorities can be allocated on %s' % listenerArn)
+            else:
+              logger.info('Allocated Random Priority: %s', random_free_priority)
+              return str(random_free_priority)
+
+          def send_response(event, context, responseStatus, physicalResourceId, responseData):
+            logger.info('physicalResourceId: %s, responseData: %s', physicalResourceId, json.dumps(responseData))
+            responseBody = json.dumps({
+              'Status': responseStatus,
+              'Reason': 'See the CloudWatch Log Stream for more details: ' + context.log_stream_name,
+              'PhysicalResourceId': physicalResourceId,
+              'StackId': event['StackId'],
+              'RequestId': event['RequestId'],
+              'LogicalResourceId': event['LogicalResourceId'],
+              'Data': responseData
+            })
+
+            logger.info('Response URL: %s', event['ResponseURL'])
+            logger.info('Response Body: %s', responseBody)
+
+            request = Request(event['ResponseURL'], data = responseBody)
+            request.add_header('Content-Type', '')
+            request.add_header('Content-Length', len(responseBody))
+            request.get_method = lambda: 'PUT'
+
+            opener = build_opener(HTTPHandler)
+            response = opener.open(request)
+
+            logger.info('Response Status Code: %s', response.getcode())
+            logger.info('Response Status Message: %s', response.msg)
+
+  ListenerRuleManagerLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    DependsOn: ListenerRuleManager
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ListenerRuleManager}
+      RetentionInDays: 14
+
+Outputs:
+  ClusterName:
+    Description: The name of the ECS cluster
+    Value: !Ref ECSCluster
+  ECSSecurityGroup:
+    Description: A security group used to allow ECS containers to receive traffic
+    Value: !Ref ECSSecurityGroup
+  ListenerRuleManagerArn:
+    Value: !GetAtt ListenerRuleManager.Arn

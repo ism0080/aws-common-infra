@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  InfraStack:
+    Type: String
+    Description: The name of the networking stack that these resources are put into.
+  AppName:
+    Type: String
+    Description: A human-readable name for the service.
+  HealthCheckPath:
+    Type: String
+    Description: Path to perform the healthcheck on each instance.
+  HealthCheckIntervalSeconds:
+    Type: Number
+    Description: Number of seconds to wait between each health check.
+  HealthCheckTimeoutSeconds:
+    Type: Number
+  HealthyThresholdCount:
+    Type: Number
+  UnhealthyThresholdCount:
+    Type: Number
+  MaximumPercent:
+    Type: Number
+  MinimumHealthyPercent:
+    Type: Number
+  AppPort:
+    Type: Number
+    Description: The port number the application inside the docker container is binding to.
+  DesiredCount:
+    Type: Number
+    Description: How many copies of the service task to run.
+  DNSHostedZoneId:
+    Description: Hosted Zone ID for the AppDomainName URL
+    Type: String
+  AppDomainName:
+    Description: URL for the service
+    Type: String
+  AppBuildNumber:
+    Type: String
+    Description: Example 2021.05.20.02
+  AppVersion:
+    Type: String
+  EcsTaskDefinition:
+    Type: String
+
+Resources:
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: !Ref HealthCheckIntervalSeconds
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: !Ref HealthCheckTimeoutSeconds
+      HealthyThresholdCount: !Ref HealthyThresholdCount
+      TargetType: ip
+      Name: !Ref AppName
+      Port: !Ref AppPort
+      Protocol: HTTP
+      UnhealthyThresholdCount: !Ref UnhealthyThresholdCount
+      VpcId:
+        Fn::ImportValue: !Sub "${InfraStack}-VPCId"
+
+  ListenerRuleManager:
+    Type: Custom::ListenerRuleManager
+    Properties:
+      ServiceToken:
+        Fn::ImportValue: !Sub "${InfraStack}-AlbListenerRuleManagerArn"
+      ListenerArn:
+        Fn::ImportValue: !Sub "${InfraStack}-PublicListener"
+      RegistryId: !Ref AWS::AccountId
+      RegistryRegion: !Ref AWS::Region
+      AppName: !Ref AppName
+      AppBuildNumber: !Ref AppBuildNumber
+      AppVersion: !Ref AppVersion
+  
+  LoadBalancerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref AppDomainName
+      ListenerArn: 
+        Fn::ImportValue: !Sub "${InfraStack}-PublicListener"
+      Priority: !GetAtt ListenerRuleManager.Priority
+
+  # ECS Service
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: LoadBalancerRule
+    Properties:
+      ServiceName: !Ref AppName
+      Cluster:
+        Fn::ImportValue: !Sub "${InfraStack}-ClusterName"
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MaximumPercent: !Ref MaximumPercent
+        MinimumHealthyPercent: !Ref MinimumHealthyPercent
+      DesiredCount: !Ref DesiredCount
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - Fn::ImportValue: !Sub "${InfraStack}-ECSSecurityGroup"
+          Subnets:
+            - Fn::ImportValue: !Sub "${InfraStack}-PublicSubnetOne"
+            - Fn::ImportValue: !Sub "${InfraStack}-PublicSubnetTwo"
+      TaskDefinition: !Ref EcsTaskDefinition
+      LoadBalancers:
+        - ContainerName: !Ref AppName
+          ContainerPort: !Ref AppPort
+          TargetGroupArn: !Ref TargetGroup
+  
+  AppServiceDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref DNSHostedZoneId
+      Name: !Ref AppDomainName
+      Type: A
+      AliasTarget:
+        DNSName: 
+          Fn::ImportValue: !Sub "${InfraStack}-ExternalUrl"
+        HostedZoneId: 
+          Fn::ImportValue: !Sub "${InfraStack}-ExternalUrlHostedZoneId"
+        EvaluateTargetHealth: false
+
+Outputs:
+  EcsServiceName:
+    Value: !GetAtt Service.Name
+  AppServiceDNSRecord:
+    Description: The Route53 entry the service is available on.
+    Value: !Sub "https://${AppServiceDNSRecord}"

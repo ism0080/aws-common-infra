@@ -1,0 +1,10 @@
+[
+    {
+        "ParameterKey": "ClusterName",
+        "ParameterValue": "#{ClusterName}#"
+    },
+    {
+        "ParameterKey": "ServerCertificateArn",
+        "ParameterValue": "#{ServerCertificateArn}#"
+    }
+]

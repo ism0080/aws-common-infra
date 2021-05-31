@@ -1,0 +1,10 @@
+[
+    {
+        "ParameterKey": "ArtifactBucketName",
+        "ParameterValue": "#{ArtifactBucketName}#"
+    },
+    {
+        "ParameterKey": "TemplatesBucketName",
+        "ParameterValue": "#{TemplatesBucketName}#"
+    }
+]

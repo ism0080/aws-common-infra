@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  ClusterName:
+    Description: Name of ECS CLuster
+    Type: String
+  ServerCertificateArn:
+    Description: SSL Arn stored in ACM
+    Type: String
+
+Resources:
+  VpcStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+        TemplateURL: 01-vpc.template
+        TimeoutInMinutes: 20
+
+  LoadBalancerStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: 02-load-balancing.template
+      Parameters:
+        VPC: !Ref VpcStack.Outputs.VpcId
+        PublicSubnetOne: !Ref VpcStack.Outputs.PublicSubnetOne
+        PublicSubnetTwo: !Ref VpcStack.Outputs.PublicSubnetTwo
+        ServerCertificateArn: !Ref ServerCertificateArn
+      TimeoutInMinutes: 20
+
+  EcsClusterStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: 03-ecs-cluster.template
+      Parameters:
+        ClusterName: !Ref ClusterName
+        VPC: !Ref VpcStack.Outputs.VpcId
+        AlbSecurityGroup: !Ref LoadBalancerStack.Outputs.AlbSecurityGroup
+      TimeoutInMinutes: 20
+
+Outputs:
+  ClusterName:
+    Description: The name of the ECS cluster
+    Value: !Ref EcsClusterStack.Outputs.ClusterName
+    Export:
+      Name: !Sub ${AWS::StackName}-ClusterName
+  ECSSecurityGroup:
+    Description: A security group used to allow ECS containers to receive traffic
+    Value: !Ref EcsClusterStack.Outputs.ECSSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-ECSSecurityGroup
+  ListenerRuleManagerArn:
+    Value: !Ref EcsClusterStack.Outputs.ListenerRuleManagerArn
+    Export:
+      Name: !Sub ${AWS::StackName}-AlbListenerRuleManagerArn
+  ExternalUrl:
+    Description: The url of the external load balancer
+    Value: !Ref LoadBalancerStack.Outputs.ExternalUrl
+    Export:
+      Name: !Sub ${AWS::StackName}-ExternalUrl
+  ExternalUrlCanonicalDNSHostedZoneId:
+    Value: !Ref LoadBalancerStack.Outputs.ExternalUrlCanonicalDNSHostedZoneId
+    Export:
+      Name: !Sub ${AWS::StackName}-ExternalUrlHostedZoneId
+  PublicListener:
+    Description: The ARN of the public load balancer's Listener
+    Value: !Ref LoadBalancerStack.Outputs.AlbListener
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicListener
+  VpcId:
+    Description: The ID of the VPC that this stack is deployed in
+    Value: !Ref VpcStack.Outputs.VpcId
+    Export:
+      Name: !Sub ${AWS::StackName}-VPCId
+  PublicSubnetOne:
+    Description: Public subnet one
+    Value: !Ref VpcStack.Outputs.PublicSubnetOne
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicSubnetOne
+  PublicSubnetTwo:
+    Description: Public subnet two
+    Value: !Ref VpcStack.Outputs.PublicSubnetTwo
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicSubnetTwo
